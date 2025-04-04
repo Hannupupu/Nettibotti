@@ -1,0 +1,43 @@
+### Python ###
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.so
+.python-version
+.pytest_cache/
+venv/
+.venv/
+env/
+ENV/
+
+### Streamlit ###
+.streamlit/secrets.toml  # Salaiset konfiguraatiot
+.streamlit/cache/        # Välimuistitiedostot
+
+### Ympäristömuuttujat ###
+.env
+.env.local
+*.env
+
+### IDE ###
+.idea/
+.vscode/
+*.swp
+*.sublime-*
+
+### Järjestelmäspesifiset ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### PDF-tiedostot (jos et halua niitä versionhallintaan) ###
+*.pdf
+!palvelukuvaus.pdf  # Sallitaan tämä erikseen (jos tarvitset sitä)
+
+### Logit ja väliaikaiset tiedostot ###
+*.log
+*.tmp
+*.bak
+
+### LangChain/FAISS ###
+faiss_index/  # FAISS-indeksitiedostot
