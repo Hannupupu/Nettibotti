@@ -1,165 +1,108 @@
 import os
 import streamlit as st
+from openai import OpenAI
 from PyPDF2 import PdfReader
 import re
 
-# Kovakoodatut säännöt käyttötarpeille (Mbps)
-SPEED_REQUIREMENTS = {
-    "pelaaminen": 100,
-    "4k": 50,
-    "perhe": 200,
-    "etätyö": 50,
-    "peruskäyttö": 10
-}
+# Alusta OpenAI
+api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+if not api_key:
+    st.error("API-avain puuttuu! Aseta se Settings > Secrets.")
+    st.stop()
 
-def parse_speeds_from_pdf(pdf_text):
-    """Parsii PDF:stä pakettien nopeudet erittäin tarkasti"""
-    packages = {}
-    
-    # Etsitään kaikki paketit ja niiden nopeudet
-    # Tarkennettu regex joka vastaa PDF:n muotoilua
-    speed_pattern = re.compile(
-        r"(Kiinteä [SMXL\+]+|Yhteys Kotiin 5G [LXL\+XXL]+).*?"
-        r"(?:Normaalinopeus[²2]|nopeus)[\s\|]*(\d+)\s*Mbit/s",
-        re.DOTALL | re.IGNORECASE
-    )
-    
-    # Lisäsääntöjä erikoistapauksille
-    special_cases = {
-        "Kiinteä S": 10,
-        "Kiinteä M": 50,
-        "Kiinteä L": 100,
-        "Kiinteä XL": 200,
-        "Kiinteä XL+": 300,
-        "Kiinteä XXL": 600,
-        "Yhteys Kotiin 5G L": 100,
-        "Yhteys Kotiin 5G XL+": 300,
-        "Yhteys Kotiin 5G XXL": 600
-    }
-    
-    # 1. Etsitään ensin regexillä
-    matches = speed_pattern.finditer(pdf_text)
-    for match in matches:
-        package = match.group(1).strip()
-        speed = int(match.group(2))
-        packages[package] = speed
-    
-    # 2. Täytetään puuttuvat erikoistapauksilla
-    for package, speed in special_cases.items():
-        if package not in packages:
-            packages[package] = speed
-    
-    # 3. Manuaalinen tarkistus
-    required_packages = [
-        "Kiinteä S", "Kiinteä M", "Kiinteä L", 
-        "Kiinteä XL", "Kiinteä XL+", "Kiinteä XXL",
-        "Yhteys Kotiin 5G L", "Yhteys Kotiin 5G XL+", "Yhteys Kotiin 5G XXL"
-    ]
-    
-    for package in required_packages:
-        if package not in packages:
-            st.warning(f"Pakettia {package} ei löytynyt PDF:stä!")
-    
-    return packages
+client = OpenAI(api_key=api_key)
 
-def recommend_package(user_input, packages):
-    """Suosittelee parasta pakettia käyttäjän tarpeiden mukaan"""
-    user_input = user_input.lower()
-    required_speed = 0
-    
-    # Päätetään vaadittu nopeus
-    if "pelaaminen" in user_input:
-        required_speed = max(required_speed, SPEED_REQUIREMENTS["pelaaminen"])
-    if "4k" in user_input:
-        required_speed = max(required_speed, SPEED_REQUIREMENTS["4k"])
-    if "perhe" in user_input:
-        required_speed = max(required_speed, SPEED_REQUIREMENTS["perhe"])
-    if "etätyö" in user_input or "etätyöt" in user_input:
-        required_speed = max(required_speed, SPEED_REQUIREMENTS["etätyö"])
-    
-    if required_speed == 0:  # Oletusarvo
-        required_speed = SPEED_REQUIREMENTS["peruskäyttö"]
-    
-    # Etsitään halvin riittävä vaihtoehto
-    suitable = []
-    for name, speed in packages.items():
-        if speed >= required_speed:
-            suitable.append((name, speed))
-    
-    if not suitable:
-        return None
-    
-    # Järjestetään nopeuden mukaan ja valitaan halvin
-    suitable.sort(key=lambda x: x[1])
-    return suitable[0]
-
-def main():
-    st.title("📶 Telian Nettiliittymäbotti")
-    
-    # Lataa ja jäsennä PDF
-    pdf_path = "palvelukuvaus.pdf"
-    if not os.path.exists(pdf_path):
-        st.error("Virhe: palvelukuvaus.pdf -tiedostoa ei löydy!")
-        st.stop()
-    
+def extract_package_info(pdf_path):
+    """Poimii pakettien tiedot PDF:stä"""
     try:
-        pdf_reader = PdfReader(pdf_path)
-        pdf_text = "\n".join(page.extract_text() or "" for page in pdf_reader.pages)
-        packages = parse_speeds_from_pdf(pdf_text)
+        reader = PdfReader(pdf_path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
         
-        # Näytä ladatut tiedot debuggausta varten
-        st.sidebar.subheader("PDF:stä löydetyt paketit")
-        st.sidebar.write(packages)
-        
+        # Poimi paketit ja nopeudet
+        packages = {}
+        matches = re.finditer(
+            r"(Kiinteä [A-Z+]+|Yhteys Kotiin 5G [A-Z+]+).*?(\d+)\s*Mbit/s", 
+            text, re.DOTALL
+        )
+        for match in matches:
+            packages[match.group(1)] = int(match.group(2))
+            
+        return {
+            "packages": packages,
+            "tech_info": text[:20000]  # Otetaan 20k merkkiä analyysiin
+        }
     except Exception as e:
         st.error(f"Virhe PDF:n lukemisessa: {str(e)}")
+        return None
+
+def generate_response(user_input, context):
+    """Luo käyttäjäystävällisen vastauksen"""
+    prompt = f"""
+    Olet Telian asiakaspalveluedustaja. Vastaa käyttäjän kysymykseen käyttämällä alla olevia tietoja.
+
+    TELIAN PAKETIT JA NOPEUDET:
+    {context['packages']}
+
+    TEKNISET TIEDOT:
+    {context['tech_info']}
+
+    KÄYTTÄJÄN KYSYMYS:
+    {user_input}
+
+    VASTAUSOHJEET:
+    1. Keskitty käyttäjän tarpeisiin
+    2. Älä mainitse dokumentteja tai teknisia lähdeviittauksia
+    3. Anna selkeät suositukset konkreettisin perustein
+    4. Käytä arkikieltä ja välttää teknisia termejä
+    5. Jos et tiedä vastausta, sano rehellisesti
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_input}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Virhe API-kutsussa: {str(e)}")
+        return None
+
+def main():
+    st.title("📶 Telian Nettineuvoja")
+    
+    # Lataa tiedot
+    pdf_info = extract_package_info("palvelukuvaus.pdf")
+    if not pdf_info:
+        st.error("Palvelutietoja ei saatavilla")
         st.stop()
     
-    # Käyttöliittymä
-    user_input = st.text_area(
-        "Kuvaile netin käyttötarkoituksiasi:",
-        placeholder="Esim. 'Pelaaminen, 4K-videot, 3 hengen perhe'",
-        height=150
-    )
+    # Keskusteluhistoria
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant", "content": "Miten voin auttaa nettiä valitessa?"}
+        ]
     
-    if st.button("Hae tarkka suositus"):
-        if not user_input.strip():
-            st.warning("Kuvaile käyttötarkoituksia saadaksesi suosituksen")
-            return
+    # Näytä historia
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+    
+    # Käsittele syöte
+    if user_input := st.chat_input("Kirjoita kysymyksesi..."):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.chat_message("user").write(user_input)
         
-        recommendation = recommend_package(user_input, packages)
-        
-        if not recommendation:
-            st.error("Sopivaa liittymäpakettia ei löytynyt")
-            return
-        
-        name, speed = recommendation
-        
-        # Muodosta yksityiskohtainen perustelu
-        reasons = []
-        if "pelaaminen" in user_input.lower() and speed >= 100:
-            reasons.append("riittää pelaamiseen (vaatii min. 100Mbps)")
-        if "4k" in user_input.lower() and speed >= 50:
-            reasons.append("riittää 4K-videoiden katseluun (min. 50Mbps)")
-        if "perhe" in user_input.lower() and speed >= 200:
-            reasons.append("riittää perhekäyttöön (min. 200Mbps)")
-        
-        if not reasons:
-            reasons.append(f"sopii käyttötarkoitukseen (nopeus {speed}Mbps)")
-        
-        # Näytä tulos
-        st.success(f"""
-        **SUOSITUS:** {name}  
-        **NOPEUS:** {speed} Mbps  
-        **PERUSTELU:** {', '.join(reasons)}
-        """)
-        
-        # Näytä vertailutaulukko
-        st.subheader("Kaikki saatavilla olevat paketit")
-        st.table({
-            "Paketti": list(packages.keys()),
-            "Nopeus (Mbps)": list(packages.values())
-        })
+        with st.spinner("Etsin parasta ratkaisua..."):
+            response = generate_response(user_input, pdf_info)
+            if response:
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": response}
+                )
+                st.chat_message("assistant").write(response)
 
 if __name__ == "__main__":
     main()
