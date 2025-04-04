@@ -6,8 +6,9 @@ from PyPDF2 import PdfReader
 # API-avain
 api_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.error("API-avain puuttuu! Aseta se Settings > Secrets.")
+    st.error("API-avain puuttuu! Tarkista .streamlit/secrets.toml tai ympäristömuuttuja.")
     st.stop()
+
 
 client = OpenAI(api_key=api_key)
 
