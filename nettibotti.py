@@ -15,8 +15,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Alusta OpenAI-asiakas
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# UUSI TURVALLINEN API-AVAIMEN HAKU (KORVATTU)
+# --------------------------------------------------
+# Hae avain Streamlit Secretsistä tai ympäristömuuttujasta
+api_key = (
+    st.secrets["openai"]["api_key"] 
+    if "openai" in st.secrets 
+    else os.getenv("OPENAI_API_KEY")
+)
+
+# Tarkista että avain on olemassa
+if not api_key:
+    st.error("""
+    🔑 OpenAI API -avain puuttuu!
+    Lisää se joko:
+    1. Streamlit Cloud: Settings → Secrets
+    2. Paikallisesti: .env-tiedostoon
+    """)
+    st.stop()  # Keskeytä sovellus jos avain puuttuu
+
+# Alusta OpenAI-asiakas turvallisesti
+client = OpenAI(api_key=api_key)
+# --------------------------------------------------
 
 def load_vectorstore(pdf_path):
     """Lataa PDF-tiedosto ja luo vektorivaraston"""
@@ -34,7 +54,11 @@ def load_vectorstore(pdf_path):
     )
     chunks = text_splitter.split_text(text)
     
-    return FAISS.from_texts(chunks, OpenAIEmbeddings())
+    # UUSI LANGCHAIN IMPORT (KORVATTU)
+    # --------------------------------------------------
+    embeddings = OpenAIEmbeddings(openai_api_key=api_key)  # Välitä avain suoraan
+    # --------------------------------------------------
+    return FAISS.from_texts(chunks, embeddings)
 
 def get_token_count(text):
     """Laskee tokenien määrän"""
